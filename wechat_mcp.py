@@ -135,23 +135,25 @@ _INSPECT_SCRIPT = r'''
 on collectButtons(uiEl, depth)
     set names to {}
     if depth > 6 then return names
-    try
-        repeat with el in (UI elements of uiEl)
-            try
-                if (class of el) is button then
-                    set nm to ""
-                    try
-                        set nm to name of el
-                    end try
-                    if nm is missing value then set nm to ""
-                    set end of names to nm
-                end if
-            end try
-            try
-                set names to names & my collectButtons(el, depth + 1)
-            end try
-        end repeat
-    end try
+    tell application "System Events"
+        try
+            repeat with el in (UI elements of uiEl)
+                try
+                    if (class of el) is button then
+                        set nm to ""
+                        try
+                            set nm to name of el
+                        end try
+                        if nm is missing value then set nm to ""
+                        set end of names to nm
+                    end if
+                end try
+                try
+                    set names to names & my collectButtons(el, depth + 1)
+                end try
+            end repeat
+        end try
+    end tell
     return names
 end collectButtons
 
@@ -196,16 +198,18 @@ _CLICK_LOGIN_SCRIPT_TEMPLATE = r'''
 on collectButtonRefs(uiEl, depth)
     set refs to {}
     if depth > 6 then return refs
-    try
-        repeat with el in (UI elements of uiEl)
-            try
-                if (class of el) is button then set end of refs to (contents of el)
-            end try
-            try
-                set refs to refs & my collectButtonRefs(el, depth + 1)
-            end try
-        end repeat
-    end try
+    tell application "System Events"
+        try
+            repeat with el in (UI elements of uiEl)
+                try
+                    if (class of el) is button then set end of refs to (contents of el)
+                end try
+                try
+                    set refs to refs & my collectButtonRefs(el, depth + 1)
+                end try
+            end repeat
+        end try
+    end tell
     return refs
 end collectButtonRefs
 
@@ -312,11 +316,17 @@ async def _inspect() -> dict:
 
     # Accessibility / automation permission errors surface on stderr.
     if code != 0:
+        err_low = err.lower()
         permission_hint = (
             "1002" in err
-            or "not allowed" in err.lower()
-            or "assistive" in err.lower()
-            or "accessibility" in err.lower()
+            or "-25211" in err  # errAEEventNotPermitted: assistive access not allowed
+            or "-1719" in err  # errAEIllegalIndex / access errors
+            or "not allowed" in err_low
+            or "assistive" in err_low
+            or "accessibility" in err_low
+            or "辅助访问" in err  # localized "assistive access"
+            or "辅助功能" in err  # localized "accessibility"
+            or "不允许" in err  # localized "not allowed"
         )
         return {
             "running": None,
