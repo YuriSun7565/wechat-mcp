@@ -1,2 +1,3 @@
 mcp>=1.2.0
 pydantic>=2.0.0
+pyobjc-framework-Quartz>=9.0  # real (hardware-level) mouse click for WeChat's custom login button

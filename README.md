@@ -27,7 +27,14 @@ It's a heuristic (so it tolerates WeChat version changes):
 - **Logged out** → WeChat is running and shows a small login window (≤ ~520×640) **or** a button whose label matches `进入微信 / 登录 / Log In`.
 - **Logged in** → WeChat is running with a normal main window, or running with no window (minimized to the menu bar).
 
-`login_wechat` clicks the login button for you, but the **final step** (scanning the QR code or confirming on your phone) still has to be done by you — that part can't be automated.
+`login_wechat` clicks the login button for you. WeChat's login buttons are
+custom-drawn and only expose the `AXRaise` accessibility action (no `AXPress`),
+so AppleScript's `click` is a no-op on them — the tool instead reads the
+button's on-screen center and delivers a **real hardware-level mouse click**
+there via Quartz (`pyobjc-framework-Quartz`). If your Mac has a remembered
+session this logs you straight in; otherwise the **final step** (scanning the
+QR code or confirming on your phone) still has to be done by you — that part
+can't be automated.
 
 ## Setup
 
@@ -155,6 +162,12 @@ server lacks Accessibility permission. Fix it in
 **System Settings → Privacy & Security → Accessibility**, enable the launching
 app (the Claude desktop app, or your terminal if running manually), then
 restart it. The tool reports `accessibility_ok: false` in this case.
+
+**`login_wechat` says it clicked but nothing happens.**
+The real mouse click needs `pyobjc-framework-Quartz` (installed via
+`requirements.txt`). If it's missing, the tool returns a `permission_error`
+explaining how to install it. Note the synthesized click also needs the
+launching app to have Accessibility permission (same as above).
 
 **It worked before but broke after a WeChat update.**
 Detection is heuristic. Adjust `LOGIN_BUTTON_KEYWORDS` and

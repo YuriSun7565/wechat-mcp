@@ -193,7 +193,11 @@ end tell
 return "RUNNING|" & winCount & "|" & w1w & "|" & w1h & "|" & my joinText(btnNames, "~~")
 '''
 
-# Click the login button. Returns CLICKED|<label>, NO_BUTTON, or NOT_RUNNING.
+# Locate the login button and return its on-screen center so the caller can
+# deliver a *real* mouse click there. WeChat's login buttons only expose the
+# AXRaise action (no AXPress), so AppleScript's `click` is a no-op on them —
+# only a synthesized hardware click (see _synth_click) actually logs in.
+# Returns FOUND|<label>|<cx>|<cy>, NO_BUTTON, or NOT_RUNNING.
 _CLICK_LOGIN_SCRIPT_TEMPLATE = r'''
 on collectButtonRefs(uiEl, depth)
     set refs to {}
@@ -235,8 +239,11 @@ tell application "System Events"
             repeat with kw in keywords
                 if lbn contains kw then
                     try
-                        click b
-                        return "CLICKED|" & bn
+                        set p to position of b
+                        set s to size of b
+                        set cx to (item 1 of p) + ((item 1 of s) / 2)
+                        set cy to (item 2 of p) + ((item 2 of s) / 2)
+                        return "FOUND|" & bn & "|" & cx & "|" & cy
                     end try
                 end if
             end repeat
@@ -287,6 +294,48 @@ async def _run(cmd: List[str], timeout: float = OSASCRIPT_TIMEOUT) -> tuple[int,
 
 async def _osascript(script: str) -> tuple[int, str, str]:
     return await _run(["osascript", "-e", script])
+
+
+def _synth_click_sync(x: float, y: float) -> Optional[str]:
+    """Deliver a real (hardware-level) left click at screen point (x, y).
+
+    WeChat's login buttons are custom-drawn and only expose AXRaise (no
+    AXPress), so AppleScript's `click` does nothing. A synthesized CGEvent
+    mouse click — which actually moves the cursor and presses — is the only
+    reliable way to activate them.
+
+    AX coordinates and CGEvent coordinates are both top-left-origin points, so
+    the center reported by System Events can be used directly.
+
+    Returns None on success, or an error string if Quartz is unavailable.
+    """
+    try:
+        import time
+
+        import Quartz  # type: ignore
+    except Exception as exc:  # pragma: no cover - import-time/runtime guard
+        return (
+            "Quartz (pyobjc-framework-Quartz) is required to click WeChat's "
+            f"login button but could not be imported: {exc}. "
+            "Install it with: pip install pyobjc-framework-Quartz"
+        )
+
+    pt = (float(x), float(y))
+    btn = Quartz.kCGMouseButtonLeft
+    move = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, pt, btn)
+    down = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseDown, pt, btn)
+    up = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseUp, pt, btn)
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, move)
+    time.sleep(0.08)
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, down)
+    time.sleep(0.06)
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
+    return None
+
+
+async def _synth_click(x: float, y: float) -> Optional[str]:
+    """Async wrapper around _synth_click_sync (runs in a thread)."""
+    return await asyncio.to_thread(_synth_click_sync, x, y)
 
 
 def _looks_like_login(button_names: List[str]) -> Optional[str]:
@@ -659,14 +708,41 @@ async def login_wechat(params: LoginInput) -> str:
             params.response_format,
         )
 
-    if out.startswith("CLICKED|"):
-        label = out.split("|", 1)[1]
-        await asyncio.sleep(1.5)
+    if out.startswith("FOUND|"):
+        parts = out.split("|")
+        label = parts[1] if len(parts) > 1 else ""
+        try:
+            cx = float(parts[2])
+            cy = float(parts[3])
+        except (IndexError, ValueError):
+            return _format_login_result(
+                "permission_error",
+                None,
+                f"Found the login button ('{label}') but could not read its "
+                "position to click it.",
+                status,
+                params.response_format,
+            )
+
+        click_err = await _synth_click(cx, cy)
+        if click_err:
+            return _format_login_result(
+                "permission_error",
+                label,
+                click_err,
+                status,
+                params.response_format,
+            )
+
+        await asyncio.sleep(2.0)
         new_status = await _inspect()
-        msg = (
-            f"Clicked the login button ('{label}'). "
-            "If a QR code or phone confirmation is shown, complete it on your phone."
-        )
+        if new_status.get("logged_in") is True:
+            msg = f"Clicked '{label}' — WeChat is now logged in. ✅"
+        else:
+            msg = (
+                f"Clicked the login button ('{label}'). "
+                "If a QR code or phone confirmation is shown, complete it on your phone."
+            )
         return _format_login_result(
             "clicked", label, msg, new_status, params.response_format
         )
