@@ -2,6 +2,13 @@
 
 An MCP server that lets Claude check and control the WeChat (微信) desktop app on macOS.
 
+Repo: <https://github.com/YuriSun7565/wechat-mcp> · License: MIT
+
+```bash
+git clone https://github.com/YuriSun7565/wechat-mcp.git
+cd wechat-mcp
+```
+
 ## Tools
 
 | Tool | What it does |
@@ -58,7 +65,8 @@ UI inspection and button-clicking use macOS accessibility. The app that **launch
 
 > System Settings → Privacy & Security → **Accessibility** → enable the launching app.
 
-Without this, `wechat_status` returns `running/logged_in = unknown` and explains the fix.
+Without this, `wechat_status` returns `accessibility_ok: false` (running /
+logged_in are `null`) and explains the fix. See [Troubleshooting](#troubleshooting).
 
 ### 3. Register the server
 
@@ -136,6 +144,30 @@ the background to confirm it boots cleanly and to watch logs.
 `server.log` stays empty while the server idles waiting for JSON-RPC input —
 that's expected. To actually exercise the tools, connect a client or use the
 MCP Inspector (see above).
+
+## Troubleshooting
+
+**`wechat_status` says it can't inspect WeChat / accessibility error.**
+The osascript output contains something like
+`execution error: "osascript" is not allowed assistive access (-25211)`
+(or the localized `不允许辅助访问`). This means the app that launched the
+server lacks Accessibility permission. Fix it in
+**System Settings → Privacy & Security → Accessibility**, enable the launching
+app (the Claude desktop app, or your terminal if running manually), then
+restart it. The tool reports `accessibility_ok: false` in this case.
+
+**It worked before but broke after a WeChat update.**
+Detection is heuristic. Adjust `LOGIN_BUTTON_KEYWORDS` and
+`LOGIN_WINDOW_MAX_WIDTH` / `LOGIN_WINDOW_MAX_HEIGHT` near the top of
+`wechat_mcp.py`.
+
+**Quick check the AppleScript compiles** (no permission needed to catch syntax
+errors — a `-2741 syntax error` means a script bug, a `-25211` means it
+compiles fine but needs Accessibility permission):
+
+```bash
+osascript -e 'tell application "System Events" to return name of first process' >/dev/null
+```
 
 ## Notes & limitations
 
